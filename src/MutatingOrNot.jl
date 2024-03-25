@@ -13,4 +13,11 @@ Base.iterate(::Void, state = nothing) = (void, nothing)
 
 Broadcast.materialize!(::Void, bc::Broadcast.Broadcasted) = Broadcast.materialize(bc)
 
+#========== for Julia <1.9 ==========#
+
+using PackageExtensionCompat
+function __init__()
+    @require_extensions
+end
+
 end
