@@ -1,6 +1,7 @@
 using MutatingOrNot: void
 using Test
-using Zygote: gradient
+using Zygote: Zygote
+using ForwardDiff: ForwardDiff
 
 f!(y, x) = @. y=x^2
 g(x) = sum(f!(void, x))
@@ -14,6 +15,7 @@ g(x) = sum(f!(void, x))
     let x = randn(10), y = similar(x)
         @test f!(y,x) == f!(void,x)
         @test (@allocated f!(y,x)) == 0
-        @test gradient(g, x)[1] ≈ 2x
+        @test Zygote.gradient(g, x)[1] ≈ 2x
+        @test ForwardDiff.gradient(g, x) ≈ 2x
     end
 end
