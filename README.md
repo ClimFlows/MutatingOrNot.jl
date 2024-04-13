@@ -7,7 +7,7 @@
 
 ## Installation
 
-`MutatingOrNot` is registered in the ClimFlows repository. [Follow instructions there](https://github.com/ClimFlows/JuliaRegistry), then:
+`MutatingOrNot` is registered in the ClimFlows registry. [Follow instructions there](https://github.com/ClimFlows/JuliaRegistry), then:
 ```julia
 ] add MutatingOrNot
 ```
