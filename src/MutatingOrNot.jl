@@ -29,7 +29,7 @@ struct BasicVoid <: Void end
 
 Instances `v` of types subtyping `DryDryn`, especially [`dryrun`](@ref), when passed
 as an output argument, are meant to signal that this argument needs to be allocated,
-but that no actual computation should take place. See [`has_dryun`](@ref).
+but that no actual computation should take place. See [`has_dryrun`](@ref).
 """
 abstract type DryRun <: Void end
 
