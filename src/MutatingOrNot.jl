@@ -87,7 +87,8 @@ has_dryrun(::DryRun) = true
 has_dryrun(x::Union{Tuple, NamedTuple}) = any(has_dryrun, x)
 has_dryrun(x...) = has_dryrun(x) # multiple arguments treated as tuple
 
-Base.show(io::IO, ::Void) = print(io, "void")
+Base.show(io::IO, ::BasicVoid) = print(io, "void")
+Base.show(io::IO, ::BasicDryRun) = print(io, "dryrun")
 
 @inline Base.getproperty(v::Void, ::Symbol) = v
 @inline Base.getindex(v::Void, args...) = v
