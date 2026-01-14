@@ -10,5 +10,5 @@ Documentation for [MutatingOrNot](https://github.com/ClimFlows/MutatingOrNot.jl)
 ```
 
 ```@autodocs
-Modules = [MutatingOrNot]
+Modules = [MutatingOrNot, MutatingOrNot.Allocators]
 ```
