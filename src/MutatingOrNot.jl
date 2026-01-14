@@ -132,6 +132,11 @@ Contrary to `Base.similar`, it is not possible to specify `eltype` or `dims` in 
 similar(y...) = Base.similar(y...)
 similar(y::Union{Tuple, NamedTuple}) = map(similar, y)
 
+# new API
+
+include("julia/allocators.jl")
+
+
 #========== for Julia <1.9 ==========#
 
 using PackageExtensionCompat
