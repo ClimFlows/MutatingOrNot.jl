@@ -1,5 +1,8 @@
 module Allocators
 
+using ..MutatingOrNot: Void, BasicVoid
+import ..MutatingOrNot: similar!
+
 const debug = false
 
 export malloc, mfree, SmartAllocator
@@ -12,7 +15,33 @@ used along the following pattern:
     ... # do some computation with y
     mfree(tmp, y) # `free` array y, in a sense depending on tmp
 """
-abstract type ArrayAllocator end
+abstract type ArrayAllocator <: Void end
+similar!(tmp::ArrayAllocator, args...) = malloc(tmp, args...)
+
+"""
+    y = malloc(tmp, args...)
+
+Return array `y`, similarly to `similar(args...)`. The allocator `tmp` may
+provide more or less sophisticated allocation strategies. See `dumb` and `SmartAllocator`.
+"""
+function malloc end
+
+"""
+    mfree(tmp, y)
+
+Free array `y`, which was previously allocated by `malloc`. Whether anything is actually done depends
+on the allocator `tmp`. See `dumb` and `SmartAllocator`.
+"""
+mfree(::Void, _) = nothing
+mfree(::A, ::A) where { A<:AbstractArray } = nothing
+
+"""
+    mfree(tmp)
+
+Free allocator `tmp`. Whether anything is actually done depends
+on the allocator `tmp`. See `dumb` and `SmartAllocator`.
+"""
+mfree(_) = nothing
 
 #======================  dumb allocator ===================#
 
@@ -28,37 +57,13 @@ Especially, freeing memory is actually left to Julia's garbage collector.
 const dumb = Dumb()
 Base.show(io::IO, ::Dumb) = print(io, :dumb)
 
-"""
-    y = malloc(tmp, args...)
-
-Return array `y`, similarly to `similar(args...)`. The allocator `tmp` may
-provide more or less sophisticated allocation strategies. See `dumb` and `SmartAllocator`.
-"""
-malloc(::Dumb, x) = similar(x)
-
-
-"""
-    mfree(tmp, y)
-
-Free array `y`, which was previously allocated by `malloc`. Whether anything is actually done depends
-on the allocator `tmp`. See `dumb` and `SmartAllocator`.
-"""
-mfree(::Dumb, _) = nothing
-
-
-"""
-    mfree(tmp)
-
-Free allocator `tmp`. Whether anything is actually done depends
-on the allocator `tmp`. See `dumb` and `SmartAllocator`.
-"""
-mfree(::Dumb) = nothing
+@inline malloc(::Dumb, args...) = similar(args...)
 
 #====================== smart allocator ===================#
 
-struct ArrayStore{A<:AbstractArray}
-    busy::Vector{A}
-    free::Vector{A}
+struct ArrayStore{T,N,A<:AbstractArray{T,N}}
+    arrays::Vector{A}
+    tags::Vector{Tuple{Bool, NTuple{N, Int}}} # for each array: (free/busy, size)
 end
 
 struct SmartAllocator <: ArrayAllocator
@@ -87,64 +92,67 @@ Base.empty!(smart::SmartAllocator) = empty!(smart.stores)
 
 # malloc
 
-function malloc(smart::SmartAllocator, x::AbstractArray{T,N}) where {T,N}
-    store = get_store(smart, x)
+malloc(smart::SmartAllocator, x::AbstractArray) = malloc_smart(smart, x, eltype(x), size(x))
+malloc(smart::SmartAllocator, x::AbstractArray, ::Type{T}) where T = malloc_smart(smart, x, eltype(x), size(x))
+
+function malloc_smart(smart::SmartAllocator, x, ::Type{T}, sz::NTuple{N,Int}) where {T,N}
+    (; arrays, tags) = store = get_store(smart, x, T, sz)
     debug && debug_store(malloc, store)
-    i = findfirst(y->size(y)==size(x), store.free)
-    y = if isnothing(i)
-        similar(x)
+    i = findfirst(tag->(tag[1] && tag[2]==sz), tags)
+    if isnothing(i)
+        y = similar(x, T, sz)
+        push!(arrays, y)
+        push!(tags, (false, sz))
     else
-        popat!(store.free, i)
+        y = store.arrays[i]
+        tags[i]  =(false, sz) # mark array as busy
+        debug && @info "reusing array" i pointer(y) map(pointer, store.arrays)
     end
-    push!(store.busy, y)
     debug && debug_store(malloc, store)
     return y
 end
 
 # mfree
 
-mfree(smart::SmartAllocator) = foreach(mfree, values(smart.stores))
+mfree(smart::SmartAllocator) = foreach(mfree, values(stores(smart)))
 
 function mfree(store::ArrayStore)
-    empty!(store.free)
-    empty!(store.busy)
+    empty!(store.arrays)
+    empty!(store.tags)
 end
 
 function mfree(smart::SmartAllocator, x::AbstractArray)
-    store = get_store(smart, x)
+    (; arrays, tags) = store = get_store(smart, x)
     debug && debug_store(mfree, store)
 
-    @assert !any(y->y===x, store.free)
-    push!(store.free, x)
-
-    i = findfirst(y->y===x, store.busy)
-    @assert !isnothing(i) 
-    popat!(store.busy, i)
-    @assert !any(y->y===x, store.busy)
+    i = findfirst(y->pointer(y)==pointer(x), arrays)
+    @assert !isnothing(i) "Array to be freed not tracked"
+    @assert !tags[i][1] "Array to be freed is already free"
+    tags[i] = (true, size(x))
 
     debug && debug_store(mfree, store)
-    # @info "mfree" i size(x) map(size, store.free) map(size, store.busy)
     return nothing
 end
 
 # helpers
 
 function debug_store(fun, store)
-    free = length(store.free)
-    busy = length(store.busy)
-    @info string(fun) free busy
+    @info string(fun) store.tags map(pointer, store.arrays)
 end
 
-@inline function get_store(smart::SmartAllocator, x::AbstractArray{T,N}) where {T,N}
-    A = similar_type(x)
-    get!(smart.stores, hash(A)) do 
-        ArrayStore{A}(A[], A[])
-    end :: ArrayStore{A} # for type stability
+@inline get_store(smart, x) = get_store(smart, x, eltype(x), size(x))
+@inline function get_store(smart, x, ::Type{T}, sz::NTuple{N,Int}) where {T,N}
+    A = similar_type(x, T, sz)
+    get!(stores(smart), hash(A)) do 
+        ArrayStore{T,N,A}(A[], Tuple{Bool, NTuple{N, Int}}[])
+    end :: ArrayStore{T,N,A} # for type stability
 end
 
-@generated function similar_type(::A) where {T, N, A<:AbstractArray{T,N}}
-    return typeof(similar(A, ntuple(i->0, Val(N))))
+@generated function similar_type(::A, ::Type{T}, ::NTuple{N, Int}) where {T, N, A<:AbstractArray}
+    B = similar(A, ntuple(i->0, Val(N)))
+    return typeof(similar(B, T))
 end
+
+@inline stores(smart) = getfield(smart, :stores)
 
 end # module
-

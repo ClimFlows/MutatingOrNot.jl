@@ -90,7 +90,9 @@ has_dryrun(x...) = has_dryrun(x) # multiple arguments treated as tuple
 Base.show(io::IO, ::BasicVoid) = print(io, "void")
 Base.show(io::IO, ::BasicDryRun) = print(io, "dryrun")
 
+# @inline Base.getproperty(v::Void, prop::Symbol) = hasfield(typeof(v), prop) ? getfield(v, prop) : v
 @inline Base.getproperty(v::Void, ::Symbol) = v
+
 @inline Base.getindex(v::Void, args...) = v
 @inline Base.iterate(v::Void, state = nothing) = (v, nothing)
 
