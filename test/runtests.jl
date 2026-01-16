@@ -21,6 +21,8 @@ is_similar(x::T, y::T) where T = (axes(x)==axes(y))
         u, v = randn(10), randn(10)
         @test is_similar(u, malloc(void, u))
         @test malloc(v, u) === v
+        @test set_dryrun(void) === dryrun
+        @test set_dryrun(dryrun) === dryrun
     end
     let x = randn(10), y = similar(x)
         @test f!(y,x) == f!(void,x)
@@ -58,6 +60,10 @@ end
 
 @testset "Allocators" begin
     x = randn(100_000)
+
+    smart_dryrun = set_dryrun(smart)
+    @test has_dryrun(smart_dryrun)
+    @test set_dryrun(smart_dryrun) === smart_dryrun
 
     let prep=prepare(x, void)
         ∂x = similar(x);

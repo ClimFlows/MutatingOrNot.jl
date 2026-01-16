@@ -99,7 +99,15 @@ In the above example,
 """
 has_dryrun(x) = false
 has_dryrun(x::Union{Tuple, NamedTuple}) = any(has_dryrun, x)
-# has_dryrun(x...) = has_dryrun(x) # multiple arguments treated as tuple
+# has_dryrun(x...) = has_dryrun(x) # mrultiple arguments treated as tuple
+
+"""
+    dryrun_tmp = set_dryrun(tmp)
+
+Return allocator `dryrun_tmp` with the same behavior as `tmp`
+except that `has_dryrun(dryrun_tmp)==true`.
+"""
+function set_dryrun end 
 
 """
     x = malloc(tmp, args...)

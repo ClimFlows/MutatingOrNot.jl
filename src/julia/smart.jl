@@ -10,7 +10,9 @@ struct SmartAllocator{Dryrun} <: ArrayAllocator
 end
 
 has_dryrun(::SmartAllocator{DryRun}) where DryRun = DryRun
-set_dryrun(smart::SmartAllocator) = SmartAllocator{true}(stores(smart))
+set_dryrun(smart::SmartAllocator{true}) = smart
+set_dryrun(smart::SmartAllocator{false}) = SmartAllocator{true}(stores(smart))
+
 @inline stores(smart) = getfield(smart, :stores) # getproperty is overloaded for ::ArrayAllocator
 
 """

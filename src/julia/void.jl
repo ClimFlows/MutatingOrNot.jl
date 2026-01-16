@@ -12,7 +12,7 @@ More specifically:
     malloc(::Void, args...) = similar(args...)
     mfree(::Void, x) = x
 
-See [`ArrayAllocator`](@ref), [`malloc`](@ref), [`mfree`](@ref) , [`with_dryrun`](@ref) and [`has_dryrun`](@ref).
+See [`ArrayAllocator`](@ref), [`malloc`](@ref), [`mfree`](@ref) , [`set_dryrun`](@ref) and [`has_dryrun`](@ref).
 See also [`void`](@ref), [`dryrun`](@ref)
 """
 abstract type Void <: ArrayAllocator end

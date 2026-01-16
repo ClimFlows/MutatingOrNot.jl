@@ -31,6 +31,7 @@ const dryrun = BasicDryRun()
 Base.show(io::IO, ::BasicDryRun) = print(io, "dryrun")
 
 has_dryrun(::DryRun) = true
+set_dryrun(tmp::DryRun) = tmp
 
 # FIXME: this must be generalized for ArrayAllocator
 @inline function Broadcast.materialize!(::DryRun, bc::Broadcast.Broadcasted)
