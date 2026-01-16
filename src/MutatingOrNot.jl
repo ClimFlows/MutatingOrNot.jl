@@ -1,71 +1,86 @@
 module MutatingOrNot
 
-"""
-    abstract type Void end
-
-Instances `v` of types subtyping `Void`, especially [`void`](@ref), when passed
-as an output argument, are meant to signal that this argument is not allocated,
-and needs to be. The aim is to implement both mutating and non-mutating styles
-in a single place, while facilitating the pre-allocation of output arguments before
-calling the mutating, non-allocating variant.
-
-To facilitate this, the following behavior is implemented whenever `v::Void`
-* `(; x, y, z) = v` results in `x==v` etc.
-* `x, y, z = v` results in `x==v` etc.
-* `@. v = expr` returns `@. expr`
-
-See also [`similar!`](@ref) and [`has_dryrun`](@ref).
-"""
-abstract type Void end
+export malloc, mfree, has_dryrun, set_dryrun, void, dryrun, SmartAllocator
 
 """
-    struct BasicVoid <: Void end
-See [`Void`](@ref).
+Parent type for array allocators. Array allocators can be passed as output arguments 
+instead of preallocated arrays needed for intermediate computations. For instance:
+
+    function myfun1(tmp::Union{AbstractArray, ArrayAllocator}, input)
+        x = malloc(tmp, ...) # allocate temporary array y, as with `similar(...)`
+        ...
+        ret = ...            # do some computation that needs `x` as scratch space
+        return ret, x
+    end
+
+    alloc = ... # create allocator
+    ret0, x = myfun1(alloc, input0) # allocates
+    ret1, _ = myfun1(x, input1)     # `x` is an array => should not allocate
+
+The point of `x` being returned is to use it in subsequent calls 
+and (potentially) avoid new allocations. A slightly different pattern is:
+
+    function myfun1(tmp::Union{AbstractArray, ArrayAllocator}, input)
+        x = malloc(tmp, ...) # allocate temporary array y, as with `similar(...)`
+        ...
+        ret = ...            # do some computation that needs `x` as scratch space
+        x = mfree(tmp, x)    # `free` array x, in a sense depending on tmp
+        return ret, x
+    end
+
+    alloc = ... # create allocator
+    ret0, tmp = myfun1(alloc, input0) # allocates
+    ret1, _ = myfun1(tmp, input1)     # `tmp` may be an array or an array allocator
+
+The precise behavior of `mfree` depends on the concrete type of `tmp`.
+`mfree(tmp, x)` may return the array `x` or `tmp` itself.
+Allocators are allowed to reuse memory passed to `mfree` for subsequent calls to `malloc`. 
+Therefore an array must not be read/written after being passed to `mfree`.
+
+Beyond arrays, nested (named) tuples arrays are supported. For this, the following behavior 
+is implemented whenever `v::ArrayAllocator`
+
+    (; x, y, z) = tmp    # results in `x==tmp` etc.
+    x, y, z = tmp        # results in `x==tmp` etc.
+    @. tmp = expr        # returns `@. expr`
+
+This enables the following, more advanced pattern:
+
+    function example(tmp::Union{AbstractArray, ArrayAllocator}, input)
+        ret1, x = myfun1(tmp.x, input)  # uses `mfree`
+        ret2, y = myfun1(tmp.y, input)  # uses `mfree`
+        # we are not allowed to read/write `x` or `y` here since they have been freed
+        # for instance `tmp` may have reused the memory allocated for `x`
+        # when allocating `y`, so that `x` and `y` refer to the same memory !
+        ret = ...            # do some computation with ret1 and ret2
+        return ret, mfree(tmp, (; x,y))
+    end
+
+    alloc = ... # create allocator
+    ret0, tmp = myfun1(alloc, input0)  # allocates
+    ret1, _  = myfun1(tmp, input1)     # `tmp` may be a named tuple of arrays, or an array allocator
+
+See [`malloc`](@ref), [`mfree`](@ref) , [`set_dryrun`](@ref) and [`has_dryrun`](@ref).
 """
-struct BasicVoid <: Void end
+abstract type ArrayAllocator end
+
+@inline Base.getproperty(v::ArrayAllocator, ::Symbol) = v
+@inline Base.getindex(v::ArrayAllocator, args...) = v
+@inline Base.iterate(v::ArrayAllocator, state = nothing) = (v, nothing)
 
 """
-    abstract type DryRun<:Void end
+When `tmp::ArrayAllocator`, `has_dryrun(tmp)==true` signals that only allocations should
+take place, but not actual work (computations). Furthermore:
 
-Instances `v` of types subtyping `DryDryn`, especially [`dryrun`](@ref), when passed
-as an output argument, are meant to signal that this argument needs to be allocated,
-but that no actual computation should take place. See [`has_dryrun`](@ref).
-"""
-abstract type DryRun <: Void end
-
-"""
-    struct BasicDryRun <: DryRun end
-See [`DryRun`](@ref).
-"""
-struct BasicDryRun <: DryRun end
-
-"""
-`void` is the only instance of the singleton type `BasicVoid <: Void`. When passed
-as an output argument, it is meant to signal that this argument is not allocated,
-and needs to be.
-See [`Void`](@ref), [`similar!`](@ref) and [`has_dryrun`](@ref).
-"""
-const void = BasicVoid()
-
-"""
-`dryrun` is the only instance of the singleton type `BasicDryRun`. When passed
-as an output argument, it is meant to signal that one wants to allocate
-that output argument, but not to do actual work. See [`void`](@ref) and [`has_dryrun`](@ref).
-"""
-const dryrun = BasicDryRun()
-
-"""
-`has_dryrun(x)` returns
-* `true` if `x::DryRun`,
-* `any(has_dryrun, x)` if `x` is a (named) tuple,
-* and false otherwise.
+    has_dryrun(x) == any(has_dryrun, x) # if `x` is a (named) tuple
+    has_dryrun(x) == false              # if `x` is an array
 
 Use it to avoid computations when only allocations are desired. Example:
 
-    function f!(x, y, z)
+    function f!(tmp, x, y)
         # allocations, if needed
-        a = similar!(x.a, y)
-        b = similar!(x.b, z)
+        a = malloc(tmp.a, x)   # same type and shape as `x`
+        b = malloc(tmp.b, y)   # same type and shape as `y`
 
         # early exit, if requested
         has_dryrun(x) && return (; a, b)
@@ -83,61 +98,42 @@ In the above example,
 * `x = f!(x, y)` mutates the pre-allocated x (non-allocating)
 """
 has_dryrun(x) = false
-has_dryrun(::DryRun) = true
 has_dryrun(x::Union{Tuple, NamedTuple}) = any(has_dryrun, x)
-has_dryrun(x...) = has_dryrun(x) # multiple arguments treated as tuple
-
-Base.show(io::IO, ::BasicVoid) = print(io, "void")
-Base.show(io::IO, ::BasicDryRun) = print(io, "dryrun")
-
-# @inline Base.getproperty(v::Void, prop::Symbol) = hasfield(typeof(v), prop) ? getfield(v, prop) : v
-@inline Base.getproperty(v::Void, ::Symbol) = v
-
-@inline Base.getindex(v::Void, args...) = v
-@inline Base.iterate(v::Void, state = nothing) = (v, nothing)
-
-@inline Broadcast.materialize!(::Void, bc::Broadcast.Broadcasted) = Broadcast.materialize(bc)
-
-@inline function Broadcast.materialize!(::DryRun, bc::Broadcast.Broadcasted)
-    F = Base.Broadcast.combine_eltypes(bc.f, bc.args)
-    Base.Broadcast.similar(bc, F)
-end
-
-# used by ManagedLoops for broadcasting
-Base.getindex(::Nothing, v::Void) = v
+# has_dryrun(x...) = has_dryrun(x) # multiple arguments treated as tuple
 
 """
-    xx = similar!(x, y...)
+    x = malloc(tmp, args...)
 
-Convenience function that replaces more concisely:
+When `tmp::ArrayAllocator`, return array `x`, similarly to `similar(args...)`. The allocator `tmp` may
+provide more or less sophisticated allocation strategies.
 
-    if x::Void
-        xx = similar(y...)
-    else
-        xx = x
-    end
+Otherwise, especially when `tmp` is an array or a (nested) (named) tuple thereof, return `tmp` itself.
+The goal is to allocate `x` only when a pre-allocated `tmp` is not provided.
 
-The goal is to allocate `xx` only when a pre-allocated `x` is not provided.
-[`similar(y...)`](@ref) defaults to `Base.similar(y...)` and [`similar(y)`](@ref) applies recursively to tuples and named tuples.
-
-See also [`has_dryrun`](@ref).
+See [`void`](@ref) and [`SmartAllocator`](@ref).
 """
-similar!(x, y...) = x
-similar!(::Void, y...) = similar(y...)
+@inline malloc(x, args...) = x
 
 """
-    x = similar(y...)
+    mfree(tmp, x)
 
-`similar(y...)` defaults to Base.similar(y...). Furthermore the single-argument `similar(y)` applies recursively to tuples and named tuples.
-Contrary to `Base.similar`, it is not possible to specify `eltype` or `dims` in this recursive variant.
+Free array `x`, which was previously allocated by `malloc(tmp, ...)`. Whether anything is actually done depends
+on the allocator `tmp`. 
+See [`void`](@ref) and [`SmartAllocator`](@ref).
 """
-similar(y...) = Base.similar(y...)
-similar(y::Union{Tuple, NamedTuple}) = map(similar, y)
+mfree(_, x) = x
 
-# new API
+"""
+    mfree(tmp)
 
-include("julia/allocators.jl")
+Free allocator `tmp`. Whether anything is actually done depends
+on the allocator `tmp`. See `void` and `SmartAllocator`.
+"""
+mfree(_) = nothing
 
+include("julia/void.jl")
+include("julia/dryrun.jl")
+include("julia/smart.jl")
 
 #========== for Julia <1.9 ==========#
 

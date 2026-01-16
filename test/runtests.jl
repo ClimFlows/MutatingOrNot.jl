@@ -1,12 +1,8 @@
-import DifferentiationInterface as DI
-import Zygote, ForwardDiff, Mooncake
-
-using MutatingOrNot: void, dryrun, has_dryrun, similar!
-using MutatingOrNot, MutatingOrNot.Allocators
-using MutatingOrNot.Allocators: dumb
-
+import Zygote, ForwardDiff, Mooncake, DifferentiationInterface as DI
 using Base: summarysize
 using Test
+
+using MutatingOrNot
 
 @assert !isnothing(Base.get_extension(MutatingOrNot, :MooncakeExt))
 
@@ -23,8 +19,8 @@ is_similar(x::T, y::T) where T = (axes(x)==axes(y))
         @test void.prop == void
         @test (x,y) == (void,void)
         u, v = randn(10), randn(10)
-        @test is_similar(u, similar!(void, u))
-        @test similar!(v, u) === v
+        @test is_similar(u, malloc(void, u))
+        @test malloc(v, u) === v
     end
     let x = randn(10), y = similar(x)
         @test f!(y,x) == f!(void,x)
@@ -63,12 +59,12 @@ end
 @testset "Allocators" begin
     x = randn(100_000)
 
-    let prep=prepare(x, dumb)
+    let prep=prepare(x, void)
         ∂x = similar(x);
-        prepgrad!(x, ∂x, prep, dumb)
+        prepgrad!(x, ∂x, prep, void)
         @test ∂x ≈ x
-        @info "" summarysize(dumb) summarysize(prep)
-        @showtime prepgrad!(x, ∂x, prep, dumb)
+        @info "" summarysize(void) summarysize(prep)
+        @showtime prepgrad!(x, ∂x, prep, void)
     end
 
     let prep = prepare(x, smart)
