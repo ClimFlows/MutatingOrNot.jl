@@ -1,74 +1,20 @@
-module Allocators
-
-using ..MutatingOrNot: Void, BasicVoid
-import ..MutatingOrNot: similar!
-
 const debug = false
-
-export malloc, mfree, SmartAllocator
-
-"""
-Parent type for array allocators. An instance `tmp::ArrayAllocator` is to be
-used along the following pattern:
-
-    y = malloc(tmp, args...) # allocate temporary array y
-    ... # do some computation with y
-    mfree(tmp, y) # `free` array y, in a sense depending on tmp
-"""
-abstract type ArrayAllocator <: Void end
-similar!(tmp::ArrayAllocator, args...) = malloc(tmp, args...)
-
-"""
-    y = malloc(tmp, args...)
-
-Return array `y`, similarly to `similar(args...)`. The allocator `tmp` may
-provide more or less sophisticated allocation strategies. See `dumb` and `SmartAllocator`.
-"""
-function malloc end
-
-"""
-    mfree(tmp, y)
-
-Free array `y`, which was previously allocated by `malloc`. Whether anything is actually done depends
-on the allocator `tmp`. See `dumb` and `SmartAllocator`.
-"""
-mfree(::Void, _) = nothing
-mfree(::A, ::A) where { A<:AbstractArray } = nothing
-
-"""
-    mfree(tmp)
-
-Free allocator `tmp`. Whether anything is actually done depends
-on the allocator `tmp`. See `dumb` and `SmartAllocator`.
-"""
-mfree(_) = nothing
-
-#======================  dumb allocator ===================#
-
-struct Dumb <: ArrayAllocator end
-"""
-The singleton `dumb` describes the simplest possible allocation strategy:
-
-    malloc(dumb, args...) == similar(args...)
-    mfree(dumb) = nothing
-
-Especially, freeing memory is actually left to Julia's garbage collector.
-"""
-const dumb = Dumb()
-Base.show(io::IO, ::Dumb) = print(io, :dumb)
-
-@inline malloc(::Dumb, args...) = similar(args...)
-
-#====================== smart allocator ===================#
 
 struct ArrayStore{T,N,A<:AbstractArray{T,N}}
     arrays::Vector{A}
     tags::Vector{Tuple{Bool, NTuple{N, Int}}} # for each array: (free/busy, size)
 end
 
-struct SmartAllocator <: ArrayAllocator
+struct SmartAllocator{Dryrun} <: ArrayAllocator
     stores::Dict{UInt64, ArrayStore}
 end
+
+has_dryrun(::SmartAllocator{DryRun}) where DryRun = DryRun
+set_dryrun(smart::SmartAllocator{true}) = smart
+set_dryrun(smart::SmartAllocator{false}) = SmartAllocator{true}(stores(smart))
+
+@inline stores(smart) = getfield(smart, :stores) # getproperty is overloaded for ::ArrayAllocator
+
 """
     smart = SmartAllocator()
 Return a smart allocator `smart`, with the following behavior:
@@ -87,13 +33,14 @@ Note of caution:
 - to avoid runaway memory usage, any `malloc` must have a corresponding `mfree`
 - this allocator is smart only if the eltype and shape requested via `malloc` belong to a small set of possibilities.
 """
-SmartAllocator() = SmartAllocator(Dict{UInt64, ArrayStore}())
+SmartAllocator() = SmartAllocator{false}(Dict{UInt64, ArrayStore}())
 Base.empty!(smart::SmartAllocator) = empty!(smart.stores)
 
 # malloc
 
-malloc(smart::SmartAllocator, x::AbstractArray) = malloc_smart(smart, x, eltype(x), size(x))
-malloc(smart::SmartAllocator, x::AbstractArray, ::Type{T}) where T = malloc_smart(smart, x, eltype(x), size(x))
+@inline malloc(smart::SmartAllocator, args...) = malloc_smart(smart, args...) # dispatch
+@inline malloc_smart(smart, x) = malloc_smart(smart, x, eltype(x), size(x))
+@inline malloc_smart(smart, x, ::Type{T}) where T = malloc_smart(smart, x, T, size(x))
 
 function malloc_smart(smart::SmartAllocator, x, ::Type{T}, sz::NTuple{N,Int}) where {T,N}
     (; arrays, tags) = store = get_store(smart, x, T, sz)
@@ -152,7 +99,3 @@ end
     B = similar(A, ntuple(i->0, Val(N)))
     return typeof(similar(B, T))
 end
-
-@inline stores(smart) = getfield(smart, :stores)
-
-end # module
