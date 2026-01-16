@@ -135,6 +135,8 @@ include("julia/void.jl")
 include("julia/dryrun.jl")
 include("julia/smart.jl")
 
+include("julia/deprecated.jl") # will be dropped at some point
+
 #========== for Julia <1.9 ==========#
 
 using PackageExtensionCompat
